@@ -1,0 +1,206 @@
+---
+title: "Modeling and prediction for movies"
+author: "Mohie eldin Muhammad"
+date: "2019/9/23"
+output: 
+  html_document:
+    toc: yes  
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(GGally)
+```
+
+### Load data
+
+```{r load-data}
+load("movies.Rdata")
+```
+* * *
+
+## Part 1: Data
+The dataset information is about movies contains 651 randomly sampled movies produced and released
+before 2016. This data set comes from Rotten Tomatoes and IMDB.There are 32 available variables.
+
+###  generabizability : 
+The data is `randomly` sampled and it's big enough (651 observations) so the generabizability princple is achieved on movies before 2016 and there is no bais in the data.
+
+### causality :
+The data is an `observational` and hence we can not conclude causality from it so we will be able to show `association` between variables and experimental data is needed for further causal analysis.
+
+
+* * *
+
+## Part 2: Research question
+What are the variables that have a good `association` with movies rating ?
+
+### Why this is an interesting question ? 
+becuase in case the model predict the rating well we will knew what poeple like the most in movies and focus on it and in case the model didn't find good association then we need to collect more data.
+
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+#### i want to see if the three types of rating 1) imdb rating 2) rotten tomatos audience 3) rotten tomatos
+#### are corolated or not :
+```{r - data manipulation 1}
+movies <- na.omit(movies)
+ggpairs(movies , columns = c(13,16,18))
+```
+
+#### because of the stonge relation between them i will take the average rating and this will be the column of interest.
+
+#### I will add ID coulmn and group on it because i want to get the average rating for each row not each movie as the movies names are often repeated.
+#### Rotten tomatos rating will be scaled by dividing on 10 to be the same  as imdb rating.
+```{r - data manipulation 2}
+movies$ID <- seq.int(nrow(movies))
+
+movies <- movies %>% group_by(ID) %>% mutate(average_rating = sum(imdb_rating + (critics_score/10) + (audience_score/10) )/3 ) 
+movies$average_rating <- round(movies$average_rating,2)
+head( movies[ , c(13,16,18,length(movies))] )
+
+movies <- movies %>% select( average_rating , genre , runtime , mpaa_rating , thtr_rel_month , best_pic_nom , best_actor_win , best_actress_win , best_dir_win , director , top200_box )
+```
+#### these will be the variables that i may include in my model and i will do EDA to see the relation between them and average_rating.
+
+```{r - EDA1 }
+ggplot(data = movies , aes(x = runtime , y = average_rating, color = runtime)  ) + geom_col()
+```
+
+#### the relation between runtime and average rating is not bad it's clear that any movies have best rate around 100 min too much or too small runtime have less average_rating
+
+```{r - EDA2 } 
+movies %>% group_by(genre ) %>% summarise(average_rating_by_genre = mean(average_rating)) %>% arrange(desc(average_rating_by_genre))
+```
+
+#### differences in rating is not too big but yet considerable
+
+```{r - EDA3 }
+ggplot(data = movies , aes(x = thtr_rel_month , y = average_rating,fill =thtr_rel_month)  ) + geom_col( ) + scale_x_discrete(limits = c(1:12))
+```
+
+#### there are 4 trends in monthes 1, 6, 10 and 12
+
+```{r - EDA4 }
+ggplot(data = movies , aes(x = mpaa_rating , y = average_rating , fill = mpaa_rating)  ) + geom_col() 
+```
+
+#### there is a clear trnd in catagory --> R: Restricted - Under 17 requires accompanying parent or adult guardian 
+
+```{r - EDA5 }
+par(mfrow = c(2,3))
+plot(movies$average_rating ~ movies$best_pic_nom , col = "yellow" , main = "best picture nomination")
+
+plot(movies$average_rating ~ movies$best_actor_win , col = "orange" , main = "best actor win ")
+
+plot(movies$average_rating ~ movies$best_actress_win , col = "steelblue" , main = "best actress win ")
+
+plot(movies$average_rating ~ movies$best_dir_win , col = "purple" , main = "best director win ")
+
+plot(movies$average_rating ~ movies$top200_box , col = "green" , main = "Box office top 200")
+```
+
+#### the median is far higher and data is less scatterd for movies that are nominated for best picture and are in box office top 200 ,also there is a slight difference in the best_director_win median 
+
+#### best actor and actress win are not are not making significant difference in avergae_rating, so i will exclude them
+```{r - EDA6 }
+length(unique(movies$director))
+```
+
+#### there are 504 levels in the director vaiable so it has to be excluded. 
+
+
+* * *
+
+## Part 4: Modeling
+```{r}
+l_m <- lm(data = movies , average_rating ~ runtime + mpaa_rating + genre + thtr_rel_month + best_pic_nom + best_dir_win + top200_box)
+summary(l_m) 
+```
+#### My initial model has Adjusted R-squared: `0.311`, let's see after automated model selection what will happen :
+```{r}
+final_model <- step(l_m , direction = "both" , trace = FALSE)
+summary(final_model)
+```
+#### Adjusted R-squared: `0.3116` which almost the same but the more important the same result is achieved without `thtr_rel_month` so this is the `parsimony` model has been reached 
+
+### Interpretation of model coefficients :
+
+#### `intercept :` with all the variables in the model being zero the average_rating for the movie will = 4.940079 (Surely this is meaningless, the intercept just serves in adjusting the hight of the line.)
+
+#### `runtime :` All else held constant for each minute increase in the runtime the model predicts the average_rating to increase by 0.011604
+
+#### All else held constant for the rest catagorical variables if this coefficeint in the summary is the chosen then its slope will be included in the model by its sign and if not then we put zero instead.
+
+## Model Diagnostics : 
+
+### 1) Linearity :
+```{r}
+ggplot(data = final_model , aes(x = .fitted , y = .resid)) + geom_point() + geom_hline(yintercept = 0 , linetype = "dashed") + xlab("fitted values") +ylab("residuals")
+```
+
+#### the residuals are randomly scatterd around zero which indicates linearity 
+
+### 2) normal residuals : 
+```{r}
+hist(final_model$residuals , col = "steelblue" ,breaks = 25, main = "residuals distribution" , xlab = "residuals" )
+
+ggplot(data = final_model , aes(sample = .resid)) + stat_qq() + stat_qq_line() + xlab("residulas")
+```
+
+#### the residuals are normally distributed in the histogram and there is a little curve in the qqplotin the top and bottom but can be accepted as most of the points fit the qqline. 
+
+### 3) constant variablility (no fan shape in the data) 
+```{r}
+ggplot(data = final_model , aes(x = .fitted , y = .resid)) + geom_point() + geom_hline(yintercept = 0 , linetype = "dashed") + xlab("fitted values") +ylab("residuals")
+
+ggplot(data = final_model , aes(x = .fitted , y = abs(.resid)) )+ geom_point() +  xlab("fitted values") +ylab("absolute residuals")
+```
+
+#### there is no fan shape in the residuals plot and no triangle in the absolute residulas plot so we are good 
+
+### 4) independent residuals :
+#### since the data is randomly sampled  then the residuals are independent as well
+* * *
+
+
+## Part 5: Prediction
+ 
+```{r}
+predicted_movie <- data.frame(runtime = 118 ,
+                              mpaa_rating = "PG-13" ,
+                              genre = "Science Fiction & Fantasy" ,
+                              best_pic_nom = "yes" ,
+                              best_dir_win = "yes",
+                              top200_box = "yes"  )
+predict(final_model , predicted_movie , interval = "prediction" , level = 0.95 )
+
+```
+
+#### so my model predict that we are 95% confident that a movie with 118 mins `runtime`, PG-13 `mpaa_rating`, Since Fiction & Fantasy `genre`, nominated to `best picture`, nominated to `best director` and in the `top 200 box office movies in BoxOfficeMojo` has an `average_rating` from 5.19 to 10 and the average is 8.49 
+* * *
+
+## Part 6: Conclusion
+#### actually the movie has rate `(7.9)` from IMDB, 94% from Tomators `(9.4)` and 82% from audience score `(8.2)` which in the average `(8.5)`and this is almost what the model predecited in average and this is a happy result for me.
+
+#### actually the data were not pretty good with a lot of catagorical variables so for improving the model more we need to add more numerical variables  such as `money spended on the movie` and so, also another problem in the data was collinearity between a lot of variables such as the 3 types of rating, nomination and winning a prize and more.
+
+#### finally it was a little hard to make model diagnostics for the catagorical vairables as this was outside the scope of the course so this mabye an issue that need more work to make the model more reliable.
+
+### Refrences for the movie : 
+https://www.rottentomatoes.com/m/arrival_2016
+
+https://www.imdb.com/title/tt2543164/ 
+
+
